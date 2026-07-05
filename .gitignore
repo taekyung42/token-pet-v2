@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.log
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# Raw ChatGPT export files (checkerboard bg, uncropped) -- processed sprites
+# (dog_idle.png, dog_run.png) are the ones actually used and tracked.
+assets/ChatGPT Image*.png
