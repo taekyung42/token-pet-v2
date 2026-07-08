@@ -1,11 +1,14 @@
 import json
 import os
 
-CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".token-pet")
+CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".token-pet-v2")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 DEFAULTS = {
-    "block_budget_tokens": 200_000_000,
+    # Rough starting guess for the (cache-read-discounted) weighted-token
+    # budget -- see log_monitor.py. Self-calibrates upward/downward once the
+    # real usage API is reachable (see PetWidget._maybe_calibrate_budget).
+    "block_budget_tokens": 30_000_000,
     "window_x": None,
     "window_y": None,
 }

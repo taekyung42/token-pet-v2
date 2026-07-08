@@ -42,9 +42,21 @@ def _extract_usage(line):
     cache_creation_tok = usage.get("cache_creation_input_tokens", 0)
     cache_read_tok = usage.get("cache_read_input_tokens", 0)
 
-    # Total, for the (fallback) 5-hour budget estimate -- the real quota
-    # counts cache reads too.
-    total_tokens = input_tok + output_tok + cache_creation_tok + cache_read_tok
+    # Weighted total, for the (fallback) 5-hour budget estimate. cache reads
+    # are the same old context getting re-sent every turn -- Anthropic bills
+    # (and very likely rate-limits) them at a fraction of a normal input
+    # token's cost, so counting them 1:1 massively overshoots real usage on
+    # any long-running conversation (a session can rack up hundreds of
+    # millions of "tokens" this way while doing very little new work).
+    # Weights mirror the standard prompt-caching cost multipliers.
+    CACHE_CREATION_WEIGHT = 1.25
+    CACHE_READ_WEIGHT = 0.1
+    budget_tokens = (
+        input_tok
+        + output_tok
+        + cache_creation_tok * CACHE_CREATION_WEIGHT
+        + cache_read_tok * CACHE_READ_WEIGHT
+    )
     # "New work" only, for the running-speed gauge. cache_read_tokens is the
     # same old context getting re-sent every single turn regardless of how
     # much Claude is actually doing right now -- in a long conversation it's
@@ -56,7 +68,7 @@ def _extract_usage(line):
     # same aggregate `usage` on every line for a given API call. Dedupe by
     # requestId (falling back to message id) so a single call is counted once.
     dedupe_key = obj.get("requestId") or message.get("id")
-    return ts, total_tokens, activity_tokens, dedupe_key
+    return ts, budget_tokens, activity_tokens, dedupe_key
 
 
 class LogMonitor(QObject):
@@ -144,10 +156,23 @@ class LogMonitor(QObject):
             elif size < last_offset:
                 self._read_new_lines(path, from_start=True)
 
+        # Events are appended in per-file read order, not global chronological
+        # order -- with more than one active project log, an older file's
+        # events can end up buried in the middle of the deque behind a newer
+        # file's events. Popping only from the front therefore can leave a
+        # stale event stuck forever (never reached), which then anchors the
+        # block-boundary computation in _compute_stats to garbage. Filter the
+        # whole buffer instead; event counts are small enough per poll that
+        # this is cheap.
         cutoff = now - SCAN_LOOKBACK_SECONDS
-        while self._events and self._events[0][0] < cutoff:
-            _, _, _, expired_key = self._events.popleft()
-            self._seen_keys.discard(expired_key)
+        if any(ev[0] < cutoff for ev in self._events):
+            kept = deque()
+            for ev in self._events:
+                if ev[0] < cutoff:
+                    self._seen_keys.discard(ev[3])
+                else:
+                    kept.append(ev)
+            self._events = kept
 
         self.updated.emit(self._compute_stats(now))
 
