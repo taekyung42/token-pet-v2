@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import (
     QColor,
     QFont,
+    QGuiApplication,
     QPainter,
     QPen,
     QPixmap,
@@ -57,16 +58,47 @@ class RunnerView(QWidget):
 
         self._tint_cache = {}
 
-        self._sprite_idle = self._load_sprite("dog_idle.png")
-        self._sprite_run = self._load_sprite("dog_run.png") or self._sprite_idle
+        self._dpr = 1.0
+        self._sprite_idle_raw = self._load_raw("dog_idle.png")
+        self._sprite_run_raw = self._load_raw("dog_run.png") or self._sprite_idle_raw
+        self._sprite_idle = None
+        self._sprite_run = None
+        self._rescale_sprites(self._starting_dpr())
+
+    def _starting_dpr(self):
+        screen = self.screen() if self.window() else None
+        screen = screen or QGuiApplication.primaryScreen()
+        return screen.devicePixelRatio() if screen else 1.0
+
+    def sync_dpr(self):
+        """Re-scale sprites if the widget's current screen (and thus its DPI)
+        has changed -- e.g. it was dragged to a different monitor, or the
+        widget only picked up its real screen after being shown."""
+        screen = self.screen()
+        dpr = screen.devicePixelRatio() if screen else 1.0
+        if abs(dpr - self._dpr) > 0.001:
+            self._rescale_sprites(dpr)
+            self.update()
+
+    def _rescale_sprites(self, dpr):
+        self._dpr = dpr
+        self._tint_cache.clear()
+        self._sprite_idle = self._scale_sprite(self._sprite_idle_raw, dpr)
+        self._sprite_run = self._scale_sprite(self._sprite_run_raw, dpr) or self._sprite_idle
 
     @staticmethod
-    def _load_sprite(filename):
+    def _load_raw(filename):
         path = os.path.join(ASSETS_DIR, filename)
         raw = QPixmap(path) if os.path.exists(path) else QPixmap()
-        if raw.isNull():
+        return None if raw.isNull() else raw
+
+    @staticmethod
+    def _scale_sprite(raw, dpr):
+        if raw is None:
             return None
-        return raw.scaledToHeight(SPRITE_HEIGHT, Qt.SmoothTransformation)
+        scaled = raw.scaledToHeight(int(SPRITE_HEIGHT * dpr), Qt.SmoothTransformation)
+        scaled.setDevicePixelRatio(dpr)
+        return scaled
 
     # ---- state feed ----
 
@@ -83,6 +115,9 @@ class RunnerView(QWidget):
     def trigger_click_reaction(self):
         self._show_message(random.choice(expr.CLICK_MESSAGES), 2.0, force=True)
         self._click_burst_until = time.time() + CLICK_BURST_DURATION
+
+    def flash_message(self, text, duration=2.0):
+        self._show_message(text, duration, force=True)
 
     # ---- messages ----
 
@@ -132,6 +167,7 @@ class RunnerView(QWidget):
             return cached
 
         tinted = QPixmap(sprite.size())
+        tinted.setDevicePixelRatio(sprite.devicePixelRatio())
         tinted.fill(Qt.transparent)
         painter = QPainter(tinted)
         painter.drawPixmap(0, 0, sprite)
@@ -246,8 +282,9 @@ class RunnerView(QWidget):
 
         painter.save()
         painter.translate(cx, base_y)
-        w = sprite.width()
-        h = sprite.height()
+        dpr = sprite.devicePixelRatio()
+        w = sprite.width() / dpr   # logical width
+        h = sprite.height() / dpr  # logical height = SPRITE_HEIGHT
         painter.drawPixmap(QRectF(-w / 2, -h, w, h), sprite, QRectF(sprite.rect()))
         painter.restore()
 

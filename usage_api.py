@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -7,6 +9,7 @@ from datetime import datetime, timezone
 CREDENTIALS_PATH = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 REQUEST_TIMEOUT_SECONDS = 10
+REFRESH_TIMEOUT_SECONDS = 30
 
 
 def _parse_iso(ts_str):
@@ -57,3 +60,25 @@ def fetch_real_usage():
         "seven_day_pct": seven_day.get("utilization"),
         "seven_day_resets_at": _parse_iso(seven_day.get("resets_at")),
     }
+
+
+def try_refresh_token():
+    """Best-effort recovery for a stale OAuth token (e.g. the machine was
+    asleep/off long enough for it to expire). Claude Code's own CLI already
+    knows how to silently refresh its stored credentials on invocation, so
+    just running it once does the job -- this lets usage tracking keep
+    working without the user ever having to open Claude Code themselves.
+    No-ops quietly if the CLI isn't installed or the call fails."""
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        return
+    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    try:
+        subprocess.run(
+            [claude_path, "update"],
+            timeout=REFRESH_TIMEOUT_SECONDS,
+            capture_output=True,
+            creationflags=creationflags,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass

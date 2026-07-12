@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
 *.log
+.venv/
+.claude/settings.local.json
 
 # PyInstaller build output
 build/

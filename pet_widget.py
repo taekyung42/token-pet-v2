@@ -68,9 +68,10 @@ def _fmt_hms(seconds):
 
 
 class PetWidget(QWidget):
-    def __init__(self):
+    def __init__(self, real_usage_monitor=None):
         super().__init__()
         self._config = cfg.load_config()
+        self._real_usage_monitor = real_usage_monitor
         self._drag_offset = None
         self._press_pos = None
         self._press_time = 0.0
@@ -246,7 +247,12 @@ class PetWidget(QWidget):
         now = time.monotonic()
         dt = now - self._last_tick
         self._last_tick = now
+        self.runner.sync_dpr()
         self.runner.advance(dt)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.runner.sync_dpr()
 
     # ---- drag to move ----
 
@@ -278,13 +284,17 @@ class PetWidget(QWidget):
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)
+        refresh_action = menu.addAction("실시간 사용량 새로고침")
+        menu.addSeparator()
         set_budget_action = menu.addAction("5시간 토큰 예산 설정...")
         reset_pos_action = menu.addAction("위치 초기화")
         menu.addSeparator()
         quit_action = menu.addAction("종료")
 
         chosen = menu.exec(event.globalPos())
-        if chosen == set_budget_action:
+        if chosen == refresh_action:
+            self._refresh_real_usage()
+        elif chosen == set_budget_action:
             self._prompt_budget()
         elif chosen == reset_pos_action:
             self._config["window_x"] = None
@@ -293,6 +303,15 @@ class PetWidget(QWidget):
             self._restore_position()
         elif chosen == quit_action:
             QApplication.instance().quit()
+
+    def _refresh_real_usage(self):
+        if self._real_usage_monitor is None:
+            self.runner.flash_message("새로고침 불가 (연동 안 됨)")
+            return
+        if self._real_usage_monitor.refresh_now():
+            self.runner.flash_message("확인 중...")
+        else:
+            self.runner.flash_message("잠시 후 다시 시도해줘")
 
     def _prompt_budget(self):
         current = self._config.get("block_budget_tokens", 30_000_000)
